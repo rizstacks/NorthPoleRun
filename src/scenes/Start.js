@@ -1,6 +1,5 @@
 import { sfx } from '../sfx.js';
 
-const WORLD_W = 4800;
 const GROUND_Y = 620;           // top of the ground
 const SPEED = 290;
 const JUMP_V = -620;
@@ -14,25 +13,65 @@ const ENEMY_TYPES = {
     collector: { name: 'Tax Collector', hp: 140, damage: 22, speed: 80,  jump: 500, scale: 0.3,  tint: 0xff8a8a },
 };
 const GOTH = "Georgia, 'Times New Roman', serif";
-const MAX_ENEMIES = 16;
 const SHOOT_COOLDOWN = 220;
+const UNLOCKED_SHOOT_COOLDOWN = 90;
 const BULLET_SPEED = 720;
 
-// [startX, endX] -- the gaps between segments are pits
-const GROUND_SEGMENTS = [[0, 1000], [1200, 2200], [2400, 3400], [3600, 4800]];
-// [centerX, topY, width] one-way ice platforms
-const PLATFORMS = [
-    [500, 500, 192], [760, 400, 160], [1100, 480, 160],
-    [1500, 500, 192], [1800, 400, 192], [2050, 500, 160], [2300, 480, 160],
-    [2700, 500, 192], [3000, 400, 192], [3300, 500, 160], [3500, 470, 160],
-    [3900, 500, 192], [4200, 400, 192],
-];
-const GOAL_X = 4650;
+// [startX, endX] gaps between ground segments are pits. [centerX, topY, width] platforms.
+const LEVELS = {
+    1: {
+        title: 'Stage 1: The Frozen Trail',
+        worldW: 4800,
+        speed: SPEED,
+        jumpV: JUMP_V,
+        maxEnemies: 16,
+        spawnDelay: 1400,
+        enemyMultiplier: 1,
+        groundSegments: [[0, 1000], [1200, 2200], [2400, 3400], [3600, 4800]],
+        platforms: [
+            [500, 500, 192], [760, 400, 160], [1100, 480, 160],
+            [1500, 500, 192], [1800, 400, 192], [2050, 500, 160], [2300, 480, 160],
+            [2700, 500, 192], [3000, 400, 192], [3300, 500, 160], [3500, 470, 160],
+            [3900, 500, 192], [4200, 400, 192],
+        ],
+        groundCoins: [300, 700, 1400, 1700, 2600, 3100, 3800, 4300],
+        goalX: 4650,
+        welcomeEnemies: [650, 760, 880, 1350],
+    },
+    2: {
+        title: 'Stage 2: The Icebound Pass',
+        worldW: 5400,
+        speed: 305,
+        jumpV: -650,
+        maxEnemies: 23,
+        spawnDelay: 960,
+        enemyMultiplier: 1.2,
+        specialGift: [150, GROUND_Y - 36],
+        groundSegments: [[0, 850], [1050, 1850], [2050, 2900], [3100, 3950], [4150, 5400]],
+        platforms: [
+            [360, 500, 176], [610, 410, 160], [900, 490, 160],
+            [1250, 500, 176], [1510, 400, 160], [1800, 480, 160],
+            [2220, 500, 176], [2480, 390, 160], [2780, 480, 160],
+            [3270, 500, 176], [3530, 400, 160], [3850, 480, 160],
+            [4320, 500, 176], [4580, 390, 160], [4880, 480, 160], [5150, 410, 160],
+        ],
+        groundCoins: [220, 730, 1170, 1680, 2190, 2800, 3220, 3880, 4280, 5200],
+        goalX: 5260,
+        welcomeEnemies: [700, 820, 1300, 2200, 3300, 4700],
+    },
+};
 
 export class Start extends Phaser.Scene {
 
-    constructor() {
-        super('Start');
+    constructor(key = 'Start', stage = 1) {
+        super(key);
+        this.stage = stage;
+    }
+
+    init(data = {}) {
+        this.livesOnStart = data.lives ?? MAX_LIVES;
+        this.giftsOnStart = data.gifts ?? 0;
+        this.weaponUnlockedOnStart = Boolean(data.weaponUnlocked);
     }
 
     preload() {
@@ -165,10 +204,12 @@ export class Start extends Phaser.Scene {
     }
 
     create() {
+        this.level = LEVELS[this.stage];
         this.makeTextures();
         this.makeAtmosphere();
-        this.coinsCollected = 0;
-        this.lives = MAX_LIVES;
+        this.coinsCollected = this.giftsOnStart;
+        this.lives = this.livesOnStart;
+        this.weaponUnlocked = this.weaponUnlockedOnStart;
         this.dying = false;
         this.finished = false;
         this.facing = 1;
@@ -184,22 +225,31 @@ export class Start extends Phaser.Scene {
         this.invulnUntil = 0;
         this.safe = { x: 150, y: GROUND_Y - 100 };
 
-        //music brought by durkheim
-        this.bgMusic = this.sound.add('bgMusic', {
-            loop: true,
-            volume: 0.25
-        });
+        // Keep the game playable while the optional music file is missing.
+        if (this.cache.audio.exists('bgMusic')) {
+            this.bgMusic = this.sound.add('bgMusic', {
+                loop: true,
+                volume: 0.25
+            });
 
-        if (this.sound.locked) {
-            this.sound.once(Phaser.Sound.Events.UNLOCKED, () => this.bgMusic.play());
-        } else {
-            this.bgMusic.play();
+            if (this.sound.locked) {
+                this.sound.once(Phaser.Sound.Events.UNLOCKED, () => {
+                    if (this.sys.isActive()) this.bgMusic.play();
+                });
+            } else {
+                this.bgMusic.play();
+            }
+
+            this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+                this.bgMusic.stop();
+                this.bgMusic.destroy();
+            });
         }
 
         // ---- world / camera ----
-        this.physics.world.setBounds(0, 0, WORLD_W, 720);
+        this.physics.world.setBounds(0, 0, this.level.worldW, 720);
         this.physics.world.setBoundsCollision(true, true, false, false); // open bottom = pits
-        this.cameras.main.setBounds(0, 0, WORLD_W, 720);
+        this.cameras.main.setBounds(0, 0, this.level.worldW, 720);
         this.cameras.main.fadeIn(500);
 
         // parallax background (fixed to the camera, scrolled slower than the world)
@@ -220,11 +270,11 @@ export class Start extends Phaser.Scene {
         // ---- ground & platforms ----
         this.solids = this.physics.add.staticGroup();       // ground: solid from every side
         this.oneWays = this.physics.add.staticGroup();      // ice platforms: jump up through them, land on top
-        GROUND_SEGMENTS.forEach(([a, b]) => {
+        this.level.groundSegments.forEach(([a, b]) => {
             const t = this.add.tileSprite((a + b) / 2, GROUND_Y + 50, b - a, 100, 'ground');
             this.solids.add(t);
         });
-        PLATFORMS.forEach(([x, y, w]) => {
+        this.level.platforms.forEach(([x, y, w]) => {
             const t = this.add.tileSprite(x, y + 12, w, 24, 'platform');
             this.oneWays.add(t);
             t.body.checkCollision.down = false;
@@ -235,17 +285,19 @@ export class Start extends Phaser.Scene {
         // ---- collectibles ----
         this.coins = this.physics.add.staticGroup();
         const coinSpots = [];
-        PLATFORMS.forEach(([x, y]) => { coinSpots.push([x - 24, y - 34], [x + 24, y - 34]); });
-        [300, 700, 1400, 1700, 2600, 3100, 3800, 4300].forEach(x => coinSpots.push([x, GROUND_Y - 36]));
-        coinSpots.forEach(([x, y]) => {
+        this.level.platforms.forEach(([x, y]) => { coinSpots.push([x - 24, y - 34], [x + 24, y - 34]); });
+        this.level.groundCoins.forEach(x => coinSpots.push([x, GROUND_Y - 36]));
+        const specialGift = this.level.specialGift;
+        const regularCoinSpots = coinSpots.filter(([x, y]) => !specialGift || Math.hypot(x - specialGift[0], y - specialGift[1]) > 44);
+        regularCoinSpots.forEach(([x, y]) => {
             const c = this.coins.create(x, y, 'gift');
             this.tweens.add({ targets: c, scale: { from: 0.9, to: 1.1 }, duration: 500 + Math.random() * 300, yoyo: true, repeat: -1 });
         });
-        this.totalCoins = coinSpots.length;
+        this.totalCoins = regularCoinSpots.length + (specialGift && !this.weaponUnlocked ? 1 : 0) + this.giftsOnStart;
 
         // ---- end of level ----
-        this.goal = this.physics.add.staticSprite(GOAL_X, GROUND_Y - 85, 'goal');
-        this.add.text(GOAL_X, GROUND_Y - 200, 'Chimney! \u2193', { fontFamily: GOTH, fontSize: '28px', fill: '#e2dcf0' }).setOrigin(0.5);
+        this.goal = this.physics.add.staticSprite(this.level.goalX, GROUND_Y - 85, 'goal');
+        this.add.text(this.level.goalX, GROUND_Y - 200, 'Chimney! \u2193', { fontFamily: GOTH, fontSize: '28px', fill: '#e2dcf0' }).setOrigin(0.5);
 
         // ---- player ----
         this.player = this.physics.add.sprite(150, GROUND_Y - 100, 'santa');
@@ -257,6 +309,11 @@ export class Start extends Phaser.Scene {
         this.player.hp = this.player.maxHp;
         this.player.damage = SANTA_STATS.damage;
 
+        if (specialGift && !this.weaponUnlocked) {
+            this.specialGift = this.physics.add.staticSprite(specialGift[0], specialGift[1], 'gift');
+            this.tweens.add({ targets: this.specialGift, scale: { from: 0.9, to: 1.1 }, duration: 520, yoyo: true, repeat: -1 });
+        }
+
         this.anims.create({ key: 'run_r', frames: this.anims.generateFrameNumbers('santa_r', { start: 0, end: 3 }), frameRate: 10, repeat: -1 });
         this.anims.create({ key: 'e_walk_r', frames: this.anims.generateFrameNumbers('ice', { frames: [0, 1, 3, 1] }), frameRate: 8, repeat: -1 });
         this.anims.create({ key: 'e_walk_l', frames: this.anims.generateFrameNumbers('ice2', { frames: [0, 1, 3, 1] }), frameRate: 8, repeat: -1 });
@@ -265,6 +322,7 @@ export class Start extends Phaser.Scene {
         this.physics.add.collider(this.player, this.solids);
         this.physics.add.collider(this.player, this.oneWays);
         this.physics.add.overlap(this.player, this.coins, (p, coin) => this.collect(coin));
+        if (this.specialGift?.active) this.physics.add.overlap(this.player, this.specialGift, () => this.unlockWeapon());
         this.physics.add.overlap(this.player, this.goal, () => this.reachGoal());
 
         // ---- bullets & enemies ----
@@ -278,8 +336,8 @@ export class Start extends Phaser.Scene {
         this.physics.add.overlap(this.player, this.enemies, (p, e) => this.hurtSanta(e));
         this.hpBars = this.add.graphics().setDepth(50);
 
-        [650, 760, 880, 1350].forEach(x => this.spawnEnemy(x));    // a welcome committee
-        this.time.addEvent({ delay: 1400, loop: true, callback: () => this.spawnEnemy() });
+        this.level.welcomeEnemies.forEach(x => this.spawnEnemy(x));
+        this.time.addEvent({ delay: this.level.spawnDelay, loop: true, callback: () => this.spawnEnemy() });
 
         // camera follows with smoothing; look-ahead offset is updated in update()
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -306,6 +364,10 @@ export class Start extends Phaser.Scene {
             .setOrigin(1, 0).setScrollFactor(0).setDepth(100);
         this.updateHud();
 
+        this.stageTitle = this.add.text(640, 150, this.level.title, { fontFamily: GOTH, fontSize: '38px', fill: '#e2dcf0', stroke: '#000', strokeThickness: 5 })
+            .setOrigin(0.5).setScrollFactor(0).setDepth(100).setAlpha(0.95);
+        this.time.delayedCall(2200, () => this.tweens.add({ targets: this.stageTitle, alpha: 0, duration: 700 }));
+
         // ---- input ----
         const K = Phaser.Input.Keyboard.KeyCodes;
         const kb = this.input.keyboard;
@@ -331,13 +393,16 @@ export class Start extends Phaser.Scene {
         const body = this.player.body;
         const x = body.center.x + this.facing * 40;
         const y = body.center.y - 15;
-        const b = this.bullets.create(x, y, 'bolt');
-        b.body.setCircle(7, 2, 2);
-        b.body.setVelocityX(this.facing * BULLET_SPEED);
-        b.dir = this.facing;
-        this.magic.explode(6, x, y);
+        const spread = this.weaponUnlocked ? [-0.24, 0, 0.24] : [0];
+        spread.forEach(angle => {
+            const b = this.bullets.create(x, y, 'bolt');
+            b.body.setCircle(7, 2, 2);
+            b.body.setVelocity(this.facing * Math.cos(angle) * BULLET_SPEED, Math.sin(angle) * BULLET_SPEED);
+            b.dir = this.facing;
+            this.time.delayedCall(1000, () => { if (b.active) b.destroy(); });
+        });
+        this.magic.explode(this.weaponUnlocked ? 10 : 6, x, y);
         sfx.shoot(this);
-        this.time.delayedCall(1000, () => { if (b.active) b.destroy(); });
     }
 
     popBullet(b) {
@@ -368,13 +433,13 @@ export class Start extends Phaser.Scene {
 
     // ---------- the hoard ----------
     spawnEnemy(forcedX) {
-        if (this.finished || this.dying || this.enemies.countActive() >= MAX_ENEMIES) return;
+        if (this.finished || this.dying || this.enemies.countActive() >= this.level.maxEnemies) return;
         const cam = this.cameras.main;
-        const inSegment = x => GROUND_SEGMENTS.some(([a, b]) => x > a + 40 && x < b - 40);
+        const inSegment = x => this.level.groundSegments.some(([a, b]) => x > a + 40 && x < b - 40);
         let x = forcedX;
         if (x === undefined) {
             const right = Math.random() < 0.7;
-            const tries = [right, !right].map(r => Phaser.Math.Clamp(r ? cam.scrollX + 1340 : cam.scrollX - 60, 50, WORLD_W - 150));
+            const tries = [right, !right].map(r => Phaser.Math.Clamp(r ? cam.scrollX + 1340 : cam.scrollX - 60, 50, this.level.worldW - 150));
             x = tries.find(inSegment);
             if (x === undefined) return;
         }
@@ -387,9 +452,9 @@ export class Start extends Phaser.Scene {
         e.baseTint = st.tint;
         e.facing = 1;
         e.type = type;
-        e.hp = e.maxHp = st.hp;
-        e.damage = st.damage;
-        e.speed = st.speed * Phaser.Math.FloatBetween(0.85, 1.15);
+        e.hp = e.maxHp = Math.round(st.hp * this.level.enemyMultiplier);
+        e.damage = Math.round(st.damage * this.level.enemyMultiplier);
+        e.speed = st.speed * this.level.enemyMultiplier * Phaser.Math.FloatBetween(0.85, 1.15);
         e.jumpV = st.jump;
         e.nextJump = 0;
         e.stunUntil = 0;
@@ -410,7 +475,7 @@ export class Start extends Phaser.Scene {
             // don't stroll off a pit edge while standing on the ground
             if (onSurface && dir && Math.abs(b.bottom - GROUND_Y) < 4) {
                 const px = e.x + dir * (b.halfWidth + 14);
-                if (!GROUND_SEGMENTS.some(([a, z]) => px > a && px < z)) dir = 0;
+                if (!this.level.groundSegments.some(([a, z]) => px > a && px < z)) dir = 0;
             }
             if (time > e.stunUntil) b.setVelocityX(dir * e.speed);
             if (dir) e.facing = dir;
@@ -462,6 +527,20 @@ export class Start extends Phaser.Scene {
         this.updateHud();
     }
 
+    unlockWeapon() {
+        if (this.weaponUnlocked || !this.specialGift?.active) return;
+        const x = this.specialGift.x;
+        const y = this.specialGift.y;
+        this.weaponUnlocked = true;
+        this.specialGift.destroy();
+        this.coinsCollected++;
+        this.sparkle.explode(24, x, y);
+        sfx.collect(this);
+        this.updateHud();
+        this.scene.pause();
+        this.scene.launch('WeaponUnlock');
+    }
+
     reachGoal() {
         if (this.finished) return;
         this.finished = true;
@@ -469,7 +548,13 @@ export class Start extends Phaser.Scene {
         this.player.body.setAllowGravity(false);
         this.sparkle.explode(40, this.goal.x, this.goal.y - 70);
         this.cameras.main.fadeOut(700);
-        this.time.delayedCall(750, () => this.scene.start('Win', { coins: this.coinsCollected, total: this.totalCoins }));
+        this.time.delayedCall(750, () => {
+            if (this.stage === 1) {
+                this.scene.start('Level2', { lives: this.lives, gifts: this.coinsCollected });
+            } else {
+                this.scene.start('Win', { coins: this.coinsCollected, total: this.totalCoins });
+            }
+        });
     }
 
     die() {
@@ -517,10 +602,11 @@ export class Start extends Phaser.Scene {
         if (dir) this.facing = dir;
 
         // horizontal movement (slightly smoothed)
-        if (time > this.hurtUntil) body.setVelocityX(Phaser.Math.Linear(body.velocity.x, dir * SPEED, grounded ? 0.35 : 0.2));
+        if (time > this.hurtUntil) body.setVelocityX(Phaser.Math.Linear(body.velocity.x, dir * this.level.speed, grounded ? 0.35 : 0.2));
 
         // shooting (hold space)
-        if (this.shootKey.isDown && time > this.lastShot + SHOOT_COOLDOWN) {
+        const shootCooldown = this.weaponUnlocked ? UNLOCKED_SHOOT_COOLDOWN : SHOOT_COOLDOWN;
+        if (this.shootKey.isDown && time > this.lastShot + shootCooldown) {
             this.shoot();
             this.lastShot = time;
         }
@@ -531,14 +617,14 @@ export class Start extends Phaser.Scene {
         // remember a safe respawn point: standing well inside a ground segment
         if (grounded) {
             this.lastGrounded = time;
-            const seg = GROUND_SEGMENTS.find(([a, b]) => p.x > a + 80 && p.x < b - 80);
+            const seg = this.level.groundSegments.find(([a, b]) => p.x > a + 80 && p.x < b - 80);
             if (seg && body.bottom >= GROUND_Y - 2) this.safe = { x: p.x, y: GROUND_Y - 100 };
         }
 
         // jump: buffer + coyote time + variable height
         if (this.jumpKeys.some(k => Phaser.Input.Keyboard.JustDown(k))) this.lastJumpPress = time;
         if (time - this.lastJumpPress < 120 && time - this.lastGrounded < 100) {
-            body.setVelocityY(JUMP_V);
+            body.setVelocityY(this.level.jumpV);
             this.lastJumpPress = -1000;
             this.lastGrounded = -1000;
             this.jumpFx.explode(10, body.center.x, body.bottom);
@@ -587,5 +673,11 @@ export class Start extends Phaser.Scene {
 
         this.wasGrounded = grounded;
         this.lastVy = body.velocity.y;
+    }
+}
+
+export class Level2 extends Start {
+    constructor() {
+        super('Level2', 2);
     }
 }

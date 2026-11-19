@@ -1,6 +1,7 @@
-import { Start } from './scenes/Start.js';
+import { Start, Level2 } from './scenes/Start.js';
 import { GameOver } from './scenes/GameOver.js';
 import { Win } from './scenes/Win.js';
+import { WeaponUnlock } from './scenes/WeaponUnlock.js';
 
 const config = {
     type: Phaser.AUTO,
@@ -12,7 +13,7 @@ const config = {
     backgroundColor: '#000000',
     pixelArt: true,
     physics: { default: 'arcade', arcade: { gravity: { y: 1400 }, debug: false } },
-    scene: [Start, GameOver, Win],
+    scene: [Start, Level2, GameOver, Win, WeaponUnlock],
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
 };
 
